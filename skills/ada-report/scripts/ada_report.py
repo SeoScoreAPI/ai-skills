@@ -13,7 +13,8 @@ Wraps the SEO Score API accessibility endpoint (https://seoscoreapi.com). Three 
     ada_report.py compare before.json after.json [--out remediation.pdf]
         Before/after remediation report: resolved, still open, and new issues.
 
-Needs SEO_SCORE_API_KEY (free key at https://seoscoreapi.com) and `pip install fpdf2`.
+Needs SEO_SCORE_API_KEY (https://seoscoreapi.com; accessibility audits need a paid plan) and
+`pip install fpdf2`. Reports are unbranded: add your own --firm / --logo / --signature.
 Works the same from Claude, ChatGPT, Gemini, or a plain terminal: it is plain Python.
 """
 
@@ -28,6 +29,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -67,7 +69,7 @@ WCAG_SC: dict[str, tuple[str, str]] = {
 
 LIMITS = (
     "This report lists what automated accessibility testing (the axe-core rule engine, run "
-    "through SEO Score API in a real browser) found on the page(s) named above at the time "
+    "in a real browser) found on the page(s) named above at the time "
     "shown. Automated tools detect a subset of WCAG 2.1 AA issues, commonly estimated at a "
     "third to a half; many criteria (for example meaningful alt text, keyboard-only use of "
     "complex widgets, captions quality) need manual review by a person. A clean automated "
@@ -84,7 +86,7 @@ LIMITS = (
 def api_key() -> str:
     key = os.environ.get("SEO_SCORE_API_KEY", "").strip()
     if not key:
-        sys.exit("SEO_SCORE_API_KEY is not set. Get a free key at https://seoscoreapi.com")
+        sys.exit("SEO_SCORE_API_KEY is not set. Get one at https://seoscoreapi.com (accessibility audits need a paid plan)")
     return key
 
 
@@ -96,9 +98,33 @@ def run_audit(url: str) -> dict[str, Any]:
         with urllib.request.urlopen(req, timeout=180) as resp:
             data: dict[str, Any] = json.load(resp)
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:300]
-        sys.exit(f"{url}: HTTP {exc.code} {detail}")
+        raw = exc.read().decode(errors="replace")
+        try:
+            detail = str(json.loads(raw).get("detail") or raw)
+        except ValueError:
+            detail = raw
+        sys.exit(f"{url}: {explain(exc.code, detail[:300])}")
+    except urllib.error.URLError as exc:
+        sys.exit(f"{url}: could not reach the audit service ({exc.reason}). Check the "
+                 "internet connection and try again.")
     return data
+
+
+def explain(code: int, detail: str) -> str:
+    """Plain-English errors for the people who actually run this (not developers)."""
+    if code == 401:
+        return "the API key was not accepted. Check SEO_SCORE_API_KEY (no quotes or spaces)."
+    if code == 403:
+        return ("your plan does not include accessibility audits, or this month's allowance "
+                f"is used up. See https://seoscoreapi.com/#pricing. ({detail})")
+    if code == 422:
+        return ("the website could not be audited. Most often the site blocks automated "
+                "browsers (bot protection) or the page failed to load. Try another page on "
+                "the same site, or ask the site owner to allow the audit. Blocked audits are "
+                f"not counted against your plan. ({detail})")
+    if code == 429:
+        return "too many audits in a short time. Wait a minute and try again."
+    return f"HTTP {code}: {detail}"
 
 
 def fingerprint(result: dict[str, Any]) -> str:
@@ -175,6 +201,21 @@ def _pdf_class() -> Any:
 
     class Report(FPDF):  # type: ignore[misc]
         footer_text = ""
+        brand: Branding | None = None
+
+        def header(self) -> None:
+            b = self.brand
+            if not b or not (b.logo or b.firm):
+                return
+            top = 10.0
+            if b.logo:
+                self.image(str(b.logo), x=self.l_margin, y=top, h=12 if self.page_no() == 1 else 8)
+            if b.firm:
+                self.set_font("Helvetica", "B", 9 if self.page_no() == 1 else 7.5)
+                self.set_text_color(60, 60, 60)
+                self.set_xy(self.l_margin, top + 1)
+                self.cell(self.w - self.l_margin - self.r_margin, 5, clean(b.firm), align="R")
+            self.set_y(top + (16 if self.page_no() == 1 else 11))
 
         def footer(self) -> None:
             self.set_y(-12)
@@ -193,16 +234,76 @@ def clean(text: Any) -> str:
     return s.encode("latin-1", "replace").decode("latin-1")
 
 
+@dataclass
+class Branding:
+    """The firm's own details. Everything is optional; with none of it the report is fully
+    unbranded (no vendor names anywhere, including the PDF metadata)."""
+
+    firm: str = ""                 # shown top-right of every page and in the footer
+    logo: Path | None = None       # PNG/JPG, drawn top-left of every page
+    prepared_for: str = ""         # client or matter, e.g. "Acme Corp. / Matter 2026-114"
+    prepared_by: str = ""          # pre-fills the signature block
+    signature: Path | None = None  # PNG/JPG of a signature, placed on the signature line
+    signature_block: bool = True
+    include_risk: bool = False     # the API's automated "lawsuit risk" flag (off by default)
+
+
 class Writer:
-    def __init__(self, title: str, footer: str) -> None:
+    def __init__(self, title: str, footer: str, brand: Branding | None = None) -> None:
+        self.brand = brand or Branding()
+        for f in (self.brand.logo, self.brand.signature):
+            if f and not Path(f).is_file():
+                sys.exit(f"image not found: {f}")
         self.pdf = _pdf_class()(format="Letter")
-        self.pdf.footer_text = footer
+        self.pdf.brand = self.brand
+        self.pdf.footer_text = f"{self.brand.firm} | {footer}" if self.brand.firm else footer
         self.pdf.alias_nb_pages()
         self.pdf.set_auto_page_break(True, margin=16)
         self.pdf.set_margins(16, 16, 16)
         self.pdf.add_page()
+        if not (self.brand.logo or self.brand.firm):
+            # Keep the top of page 1 clear so a logo or letterhead can be stamped on later
+            # (Acrobat, Preview, or printing onto letterhead).
+            self.pdf.set_y(30)
         self.pdf.set_title(clean(title))
-        self.pdf.set_creator(f"SEO Score API ada-report {VERSION}")
+        self.pdf.set_author(clean(self.brand.firm))
+        self.pdf.set_creator(clean(self.brand.firm))
+        self.pdf.set_producer(clean(self.brand.firm))
+
+    def signature_block(self) -> None:
+        b = self.brand
+        if not b.signature_block:
+            return
+        pdf = self.pdf
+        if pdf.get_y() > pdf.h - 70:
+            pdf.add_page()
+        self.h2("Review")
+        pdf.ln(4)
+        col = (self.w - 10) / 2
+        y = pdf.get_y()
+        for i, (label, value) in enumerate([("Reviewed by", b.prepared_by),
+                                             ("Signature", "")]):
+            x = pdf.l_margin + i * (col + 10)
+            if label == "Signature" and b.signature:
+                pdf.image(str(b.signature), x=x, y=y - 2, h=12)
+            elif value:
+                pdf.set_xy(x, y + 4)
+                pdf.set_font("Helvetica", "", 10)
+                pdf.set_text_color(20, 20, 20)
+                pdf.cell(col, 6, clean(value))
+            pdf.set_draw_color(120, 120, 120)
+            pdf.line(x, y + 11, x + col, y + 11)
+            pdf.set_xy(x, y + 12)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(col, 4, label)
+        y += 22
+        for i, label in enumerate(["Title", "Date"]):
+            x = pdf.l_margin + i * (col + 10)
+            pdf.line(x, y + 11, x + col, y + 11)
+            pdf.set_xy(x, y + 12)
+            pdf.cell(col, 4, label)
+        pdf.set_xy(pdf.l_margin, y + 20)
 
     @property
     def w(self) -> float:
@@ -269,35 +370,40 @@ def when(iso: str) -> str:
         return iso
 
 
-def render_audit(data: dict[str, Any], out: Path, prepared_for: str = "") -> Path:
+def render_audit(data: dict[str, Any], out: Path, brand: Branding | None = None) -> Path:
+    brand = brand or Branding()
     r = data["result"]
     url = r.get("url") or data.get("requested_url", "")
     summ = r.get("summary") or {}
     vs = violations(r)
     w = Writer(f"Accessibility audit: {url}",
-               f"SEO Score API accessibility audit | {url} | {when(data.get('audited_at',''))}"
-               f" | SHA-256 {data.get('sha256','')[:16]}...")
+               f"Accessibility audit | {url} | {when(data.get('audited_at',''))}"
+               f" | SHA-256 {data.get('sha256','')[:16]}...", brand)
     w.h1("Website Accessibility Audit")
     w.p(f"{url}", 11, bold=True, color=(37, 99, 235))
     w.pdf.ln(2)
     rows = [("Audited", when(data.get("audited_at", ""))),
             ("Standard", str(r.get("standard") or "WCAG 2.1 AA")),
-            ("Method", "Automated axe-core checks in a real browser (SEO Score API)"),
+            ("Method", "Automated axe-core rule checks, run in a real browser"),
             ("HTTP status", str(r.get("response_code", ""))),
             ("Fingerprint", f"SHA-256 {data.get('sha256','')}")]
-    if prepared_for:
-        rows.insert(0, ("Prepared for", prepared_for))
+    if brand.prepared_for:
+        rows.insert(0, ("Prepared for", brand.prepared_for))
     w.kv(rows)
 
     w.h2("Summary")
     risk = (r.get("lawsuit_risk") or {})
-    w.kv([("Score", f"{r.get('score', '?')}/100 (grade {r.get('grade', '?')})"),
-          ("Rules checked", str(summ.get("total_rules_checked", ""))),
-          ("Failed", f"{summ.get('violations', len(vs))} rule(s), "
-                     f"{sum(int(v.get('affected_elements') or 0) for v in vs)} element(s)"),
-          ("Passed", str(summ.get("passes", ""))),
-          ("Needs manual review", str(summ.get("incomplete", ""))),
-          ("Automated risk flag", f"{risk.get('level', 'n/a')}: {risk.get('summary', '')}")])
+    summary_rows = [
+        ("Score", f"{r.get('score', '?')}/100 (grade {r.get('grade', '?')})"),
+        ("Rules checked", str(summ.get("total_rules_checked", ""))),
+        ("Failed", f"{summ.get('violations', len(vs))} rule(s), "
+                   f"{sum(int(v.get('affected_elements') or 0) for v in vs)} element(s)"),
+        ("Passed", str(summ.get("passes", ""))),
+        ("Needs manual review", str(summ.get("incomplete", "")))]
+    if brand.include_risk and risk:
+        summary_rows.append(("Automated risk flag",
+                             f"{risk.get('level', 'n/a')}: {risk.get('summary', '')}"))
+    w.kv(summary_rows)
 
     w.h2("Issues found")
     if not vs:
@@ -355,8 +461,7 @@ def render_audit(data: dict[str, Any], out: Path, prepared_for: str = "") -> Pat
     w.p(f"Raw result preserved in the audit JSON; recomputing SHA-256 over its 'result' "
         f"object (sorted keys, compact) reproduces {data.get('sha256','')}.", 8,
         color=(100, 116, 139))
-    w.p("Generated with the open-source ada-report skill: github.com/SeoScoreAPI | "
-        "API: seoscoreapi.com", 8, color=(100, 116, 139))
+    w.signature_block()
     w.save(out)
     return out
 
@@ -376,12 +481,14 @@ def diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, list[dict[s
 
 
 def render_compare(before: dict[str, Any], after: dict[str, Any], out: Path,
-                   prepared_for: str = "") -> Path:
+                   brand: Branding | None = None) -> Path:
+    brand = brand or Branding()
     url = after["result"].get("url") or after.get("requested_url", "")
     d = diff(before, after)
     w = Writer(f"Remediation report: {url}",
-               f"SEO Score API remediation report | {url} | "
-               f"before {before.get('sha256','')[:12]} | after {after.get('sha256','')[:12]}")
+               f"Remediation report | {url} | "
+               f"before {before.get('sha256','')[:12]} | after {after.get('sha256','')[:12]}",
+               brand)
     w.h1("Accessibility Remediation Report")
     w.p(url, 11, bold=True, color=(37, 99, 235))
     w.pdf.ln(2)
@@ -389,9 +496,9 @@ def render_compare(before: dict[str, Any], after: dict[str, Any], out: Path,
                        f"{before['result'].get('score','?')}, SHA-256 {before.get('sha256','')[:16]}...)"),
             ("After", f"{when(after.get('audited_at',''))}  (score "
                       f"{after['result'].get('score','?')}, SHA-256 {after.get('sha256','')[:16]}...)"),
-            ("Standard", "WCAG 2.1 AA, automated axe-core checks (SEO Score API)")]
-    if prepared_for:
-        rows.insert(0, ("Prepared for", prepared_for))
+            ("Standard", "WCAG 2.1 AA, automated axe-core rule checks")]
+    if brand.prepared_for:
+        rows.insert(0, ("Prepared for", brand.prepared_for))
     w.kv(rows)
 
     w.h2("Result")
@@ -423,6 +530,7 @@ def render_compare(before: dict[str, Any], after: dict[str, Any], out: Path,
     w.p("Issues are matched by axe-core rule between the two audits; element counts come "
         "from each audit. Both raw results are preserved in their audit JSON files.", 8,
         color=(100, 116, 139))
+    w.signature_block()
     w.save(out)
     return out
 
@@ -438,17 +546,34 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("urls", nargs="*")
     a.add_argument("--file", type=Path, help="text file with one URL per line")
     a.add_argument("--out", type=Path, default=Path("accessibility-audits"))
-    a.add_argument("--prepared-for", default="")
+    a.add_argument("--prepared-for", default="", help="client and/or matter")
     p = sub.add_parser("pdf", help="render a saved audit JSON as PDF")
     p.add_argument("audit", type=Path)
     p.add_argument("--out", type=Path)
-    p.add_argument("--prepared-for", default="")
+    p.add_argument("--prepared-for", default="", help="client and/or matter")
     c = sub.add_parser("compare", help="before/after remediation PDF")
     c.add_argument("before", type=Path)
     c.add_argument("after", type=Path)
     c.add_argument("--out", type=Path)
-    c.add_argument("--prepared-for", default="")
+    c.add_argument("--prepared-for", default="", help="client and/or matter")
+    for sp in (a, p, c):
+        g = sp.add_argument_group("your firm's details (all optional; without them the report "
+                                  "is unbranded)")
+        g.add_argument("--firm", "--firm-name", dest="firm", default="",
+                       help="firm name, top-right of every page")
+        g.add_argument("--logo", "--firm-logo", dest="logo", type=Path,
+                       help="PNG/JPG logo, top-left of every page")
+        g.add_argument("--prepared-by", "--reviewer", dest="prepared_by", default="",
+                       help="pre-fills the signature block")
+        g.add_argument("--signature", type=Path, help="PNG/JPG signature image")
+        g.add_argument("--no-signature-block", action="store_true")
+        g.add_argument("--include-risk", action="store_true",
+                       help="include the API's automated lawsuit-risk flag (off by default)")
     args = ap.parse_args(argv)
+    brand = Branding(firm=args.firm, logo=args.logo, prepared_for=args.prepared_for,
+                     prepared_by=args.prepared_by, signature=args.signature,
+                     signature_block=not args.no_signature_block,
+                     include_risk=args.include_risk)
 
     if args.cmd == "audit":
         urls = list(args.urls)
@@ -463,19 +588,19 @@ def main(argv: list[str] | None = None) -> int:
             base = f"{slug(url)}-{stamp[:15]}Z"
             args.out.mkdir(parents=True, exist_ok=True)
             (args.out / f"{base}.json").write_text(json.dumps(data, indent=2))
-            pdf = render_audit(data, args.out / f"{base}.pdf", args.prepared_for)
+            pdf = render_audit(data, args.out / f"{base}.pdf", brand)
             r = data["result"]
             print(f"{url}: score {r.get('score')} ({r.get('grade')}), "
                   f"{len(r.get('violations') or [])} failed rule(s)\n  JSON {args.out / base}.json\n  PDF  {pdf}")
     elif args.cmd == "pdf":
         data = load(args.audit)
         out = render_audit(data, args.out or args.audit.with_name(
-            args.audit.name.removesuffix(".json") + ".pdf"), args.prepared_for)
+            args.audit.name.removesuffix(".json") + ".pdf"), brand)
         print(out)
     else:
         before, after = load(args.before), load(args.after)
         out = render_compare(before, after, args.out or args.after.with_name(
-            args.after.name.removesuffix(".json") + "-remediation.pdf"), args.prepared_for)
+            args.after.name.removesuffix(".json") + "-remediation.pdf"), brand)
         d = diff(before, after)
         print(f"resolved {len(d['resolved'])}, still open {len(d['still_open'])}, "
               f"new {len(d['new'])}\n{out}")

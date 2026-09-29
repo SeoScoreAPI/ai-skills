@@ -19,12 +19,24 @@ pip install fpdf2
 export SEO_SCORE_API_KEY="your_key"   # https://seoscoreapi.com (accessibility audits need a paid plan, from $5/mo)
 ```
 
+On Windows PowerShell: `$env:SEO_SCORE_API_KEY="your_key"`. If `python3` isn't found, use `python`.
+
 ## Commands
+
+Each `audit` of a URL counts as one accessibility audit on your plan (Starter includes 5 a
+month). `pdf` and `compare` work from saved JSON and cost nothing, so re-render with
+those rather than re-auditing. `--help` on any command lists every option.
 
 ```bash
 # Audit one or more pages: writes <site>-<UTC time>.json and .pdf per URL
 python3 skills/ada-report/scripts/ada_report.py audit https://example.com https://example.com/contact \
     --out accessibility-audits --prepared-for "Matter 2026-114"
+
+# Put YOUR firm on it (all optional). Without these the report is fully unbranded.
+python3 skills/ada-report/scripts/ada_report.py audit https://example.com \
+    --firm "Sample & Partners LLP" --logo firm-logo.png \
+    --prepared-for "Acme Corp. / Matter 2026-114" --prepared-by "Jane Doe, Esq." \
+    --signature jane-signature.png
 
 # Audit a list of URLs (one per line, # for comments)
 python3 skills/ada-report/scripts/ada_report.py audit --file urls.txt --out accessibility-audits
@@ -43,8 +55,22 @@ python3 skills/ada-report/scripts/ada_report.py compare before.json after.json -
 | "audit example.com for accessibility" / "ADA check" | `audit https://example.com` |
 | "audit these pages" / "the whole list" | `audit <url> <url> ...` or `audit --file urls.txt` |
 | "put the client/matter name on it" | add `--prepared-for "..."` |
+| "put our firm name / logo on it" | add `--firm "..."` and/or `--logo path.png` (PNG or JPG) |
+| "I'm the reviewer" / "add my signature" | `--prepared-by "Name"`, and `--signature path.png` if they have an image |
+| "no signature lines" | `--no-signature-block` |
+| "include the risk rating" | `--include-risk` (the API's automated lawsuit-risk flag; off by default) |
 | "they fixed it, run it again and show what changed" | `audit` the same URL, then `compare <old json> <new json>` |
 | "make the PDF again" | `pdf <json>` |
+
+## If something goes wrong
+
+| Message | What it means | What to do |
+|---|---|---|
+| "the website could not be audited" (HTTP 422) | The site blocks automated browsers, or the page didn't load | Try another page on the same site, or ask the site owner to allow the audit. Not counted against the plan. |
+| "your plan does not include accessibility audits" (403) | Free plan, or the monthly allowance is used | Upgrade or wait for the next month: seoscoreapi.com/#pricing |
+| "the API key was not accepted" (401) | Key missing or mistyped | Re-set `SEO_SCORE_API_KEY` without quotes or spaces |
+| "image not found" | The logo or signature path is wrong | Check the file path; PNG or JPG only |
+| "Missing dependency" | fpdf2 isn't installed | `pip install fpdf2` |
 
 ## After running
 
@@ -57,6 +83,20 @@ python3 skills/ada-report/scripts/ada_report.py compare before.json after.json -
 4. Never edit the JSON by hand; re-run the audit instead (an edited file no longer matches
    its fingerprint and the script warns about it).
 
+## Branding: unbranded by default
+
+The PDF carries **no vendor branding** (not in the text, the footer, or the PDF
+metadata), so it can go out under the firm's name.
+- `--firm` prints the firm name top-right on every page and in the footer; `--logo` adds a
+  PNG/JPG logo top-left on every page. Without a logo, the top of page 1 is left clear so a
+  logo or letterhead can be stamped on later (Acrobat, Preview) or printed on letterhead.
+- Every report ends with a **Review** block: Reviewed by / Signature / Title / Date lines.
+  `--prepared-by` fills the name; `--signature` places a signature image; or sign it by
+  hand / e-signature afterwards.
+- The API's automated "lawsuit risk" flag is **left out** unless `--include-risk` is given,
+  since the report may be shared or produced.
+- Firm details work the same on `pdf` (re-render a saved audit) and `compare`.
+
 ## What the report contains
 
 - URL, date/time (UTC), standard, method, HTTP status, SHA-256 fingerprint
@@ -66,6 +106,7 @@ python3 skills/ada-report/scripts/ada_report.py compare before.json after.json -
   element-specific fix such as the measured contrast ratio)
 - Best-practice findings (not WCAG failures) and items needing manual review
 - Scope and limits
+- Review block (reviewer, signature, title, date)
 
 Plain Python (stdlib + fpdf2), so it runs the same from Claude, ChatGPT (with code
 execution), Gemini, Cursor, or a terminal.

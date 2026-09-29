@@ -1,0 +1,172 @@
+{
+  "tool": "seoscoreapi ada-report",
+  "tool_version": "1.0.0",
+  "requested_url": "https://seoscoreapi.com",
+  "audited_at": "2026-09-29T22:37:51+00:00",
+  "api": "https://seoscoreapi.com/audit/accessibility",
+  "sha256": "703a1000c8ad7dc690d653e71beaa02edc4ccb0d828e3ed26b0c9a25aa815eb5",
+  "result": {
+    "url": "https://seoscoreapi.com/",
+    "score": 86.8,
+    "grade": "B",
+    "standard": "WCAG 2.1 AA",
+    "response_code": 200,
+    "summary": {
+      "total_rules_checked": 49,
+      "violations": 1,
+      "passes": 30,
+      "incomplete": 0,
+      "best_practice_issues": 0
+    },
+    "lawsuit_risk": {
+      "level": "low",
+      "summary": "Minor WCAG 2.1 AA violations detected. Low lawsuit risk, but they need fixing for full WCAG 2.1 AA compliance.",
+      "high_risk_violations": [
+        {
+          "rule_id": "color-contrast",
+          "impact": "serious",
+          "description": "Elements must meet minimum color contrast ratio thresholds",
+          "affected_count": 5,
+          "category": "Color Contrast"
+        }
+      ]
+    },
+    "categories": {
+      "aria": {
+        "label": "ARIA Attributes",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 7,
+        "issues": []
+      },
+      "color_contrast": {
+        "label": "Color Contrast",
+        "score": 66.7,
+        "violations": 1,
+        "passes": 2,
+        "issues": [
+          {
+            "rule_id": "color-contrast",
+            "impact": "serious",
+            "description": "Elements must meet minimum color contrast ratio thresholds",
+            "affected_elements": 5,
+            "fix_suggestion": "Increase the contrast between the text and its background to at least 4.5:1 (3:1 for large text). Darken the text or lighten the background."
+          }
+        ]
+      },
+      "forms": {
+        "label": "Forms & Labels",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 1,
+        "issues": []
+      },
+      "images": {
+        "label": "Images & Alt Text",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 1,
+        "issues": []
+      },
+      "keyboard": {
+        "label": "Keyboard & Navigation",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 1,
+        "issues": []
+      },
+      "links_buttons": {
+        "label": "Links & Buttons",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 3,
+        "issues": []
+      },
+      "other": {
+        "label": "Other",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 9,
+        "issues": []
+      },
+      "structure": {
+        "label": "Document Structure",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 3,
+        "issues": []
+      },
+      "tables": {
+        "label": "Tables",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 2,
+        "issues": []
+      },
+      "viewport": {
+        "label": "Viewport & Zoom",
+        "score": 100.0,
+        "violations": 0,
+        "passes": 1,
+        "issues": []
+      }
+    },
+    "violations": [
+      {
+        "rule_id": "color-contrast",
+        "impact": "serious",
+        "type": "wcag",
+        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+        "help": "Elements must meet minimum color contrast ratio thresholds",
+        "help_url": "https://dequeuniversity.com/rules/axe/4.10/color-contrast?application=axeAPI",
+        "wcag_tags": [
+          "wcag2aa",
+          "wcag143"
+        ],
+        "category": "color_contrast",
+        "fix": "Increase the contrast between the text and its background to at least 4.5:1 (3:1 for large text). Darken the text or lighten the background.",
+        "affected_elements": 5,
+        "element_samples": [
+          {
+            "html": "<span style=\"opacity:0.85;\">new, in private beta</span>",
+            "target": [
+              ".hero > p:nth-child(5) > span"
+            ],
+            "fix_suggestion": "Text contrast is 4.29:1 (#757575 on #0a0a0a); it needs at least 4.5:1. Darken the text or lighten the background until it passes.",
+            "failure_summary": "Fix any of the following:\n  Element has insufficient color contrast of 4.29 (foreground color: #757575, background color: #0a0a0a, font size: 10.8pt (14.4px), font weight: normal). Expected contrast ratio of 4.5:1"
+          },
+          {
+            "html": "<a href=\"https://www.google.com/preferences/source?q=seoscoreapi.com\" rel=\"noopener\" target=\"_blank\" style=\"display:inline-flex; align-items:center; gap:0.5rem; padding:0.5rem 1rem;\n                  ",
+            "target": [
+              "div:nth-child(4) > a[rel=\"noopener\"][target=\"_blank\"]"
+            ],
+            "fix_suggestion": "Text contrast is 3.56:1 (#2563eb on #141414); it needs at least 4.5:1. Darken the text or lighten the background until it passes.",
+            "failure_summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.56 (foreground color: #2563eb, background color: #141414, font size: 10.2pt (13.6px), font weight: normal). Expected contrast ratio of 4.5:1"
+          },
+          {
+            "html": "<a href=\"https://www.g2.com/sellers/seo-score-api\" rel=\"noopener\" target=\"_blank\" style=\"color:var(--accent);\">Review us on G2</a>",
+            "target": [
+              "p:nth-child(7) > a[rel=\"noopener\"][target=\"_blank\"]"
+            ],
+            "fix_suggestion": "Text contrast is 3.83:1 (#2563eb on #0a0a0a); it needs at least 4.5:1. Darken the text or lighten the background until it passes.",
+            "failure_summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.83 (foreground color: #2563eb, background color: #0a0a0a, font size: 9.8pt (13.12px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ],
+    "best_practices": [],
+    "needs_review": [],
+    "priorities": [
+      {
+        "severity": "high",
+        "impact": "serious",
+        "type": "wcag",
+        "rule_id": "color-contrast",
+        "issue": "Elements must meet minimum color contrast ratio thresholds",
+        "fix": "Increase the contrast between the text and its background to at least 4.5:1 (3:1 for large text). Darken the text or lighten the background.",
+        "help_url": "https://dequeuniversity.com/rules/axe/4.10/color-contrast?application=axeAPI",
+        "affected_elements": 5
+      }
+    ]
+  }
+}

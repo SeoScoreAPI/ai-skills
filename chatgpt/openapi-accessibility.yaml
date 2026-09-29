@@ -1,0 +1,45 @@
+openapi: 3.1.0
+info:
+  title: SEO Score API - Accessibility audit
+  version: 1.0.0
+  description: >
+    ADA / WCAG 2.1 AA accessibility audit of a single web page (axe-core in a real
+    browser). Paid SEO Score API plans only. Get a key at https://seoscoreapi.com
+servers:
+  - url: https://seoscoreapi.com
+paths:
+  /audit/accessibility:
+    get:
+      operationId: auditAccessibility
+      summary: Run a WCAG 2.1 AA accessibility audit on one URL
+      parameters:
+        - name: url
+          in: query
+          required: true
+          description: Full URL including https://
+          schema:
+            type: string
+      responses:
+        "200":
+          description: >
+            Audit result: url, score, grade, standard, response_code, summary,
+            lawsuit_risk, categories, violations (rule_id, impact, help, description,
+            wcag_tags, fix, affected_elements, element_samples), best_practices,
+            needs_review, priorities.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Invalid or missing API key
+        "403":
+          description: Plan limit reached or plan does not include accessibility audits
+      security:
+        - apiKey: []
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key

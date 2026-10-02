@@ -9,4 +9,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install fpdf2 pypdf pytest
-      - run: pytest -q skills/ada-report/tests
+      - run: pytest -q skills/ada-report/tests skills/seo-score/tests

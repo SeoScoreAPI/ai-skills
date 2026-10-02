@@ -18,8 +18,13 @@ Run SEO audits directly using the SEO Score API.
 # Audit a single URL (works without API key via demo endpoint)
 python3 skills/seo-score/scripts/seo_audit.py audit https://example.com
 
-# Deep Audit — async, 14k+ checks across 9 sections (requires Pro/Ultra API key)
-python3 skills/seo-score/scripts/seo_audit.py deep https://example.com
+# Deep Audit — async, 14k+ checks across 9 sections (Pro/Ultra, or Deep Audit credits)
+python3 skills/seo-score/scripts/seo_audit.py deep https://example.com --business-type saas
+
+# Deep Audit without waiting: start, check back, see what's left this month
+python3 skills/seo-score/scripts/seo_audit.py deep-start https://example.com
+python3 skills/seo-score/scripts/seo_audit.py deep-status <job_id>
+python3 skills/seo-score/scripts/seo_audit.py deep-usage
 
 # Batch audit multiple URLs (requires API key)
 python3 skills/seo-score/scripts/seo_audit.py batch https://example.com https://another.com
@@ -49,6 +54,8 @@ Without an API key, single audits use the demo endpoint (rate limited).
 |---|---|
 | "audit example.com" | `audit https://example.com` |
 | "deep audit example.com" / "run the deep scan" | `deep https://example.com` |
+| "start a deep audit and I'll check later" | `deep-start <url>`, then `deep-status <job_id>` |
+| "how many deep audits do I have left?" | `deep-usage` |
 | "check the SEO score of my site" | `audit <url>` |
 | "compare these two sites" | `batch <url1> <url2>` |
 | "run SEO checks on these pages" | `batch <url1> <url2> ...` |
@@ -68,15 +75,21 @@ Use `--json` flag on any command for raw JSON output.
 
 ### Deep Audit output
 
-`deep` runs the async engine at `engine.seoscoreapi.com` (Pro/Ultra key required;
-Ultra/Pro tiers are auto-granted engine access). It posts the job, polls to
-completion (progress printed to stderr, ~1-3 min), then prints:
+`deep` runs a Deep Site Audit on the main host, `https://seoscoreapi.com`
+(`POST /site-audit`, then polls `GET /site-audit/{job_id}`). Included on Pro (20/month)
+and Ultra (100/month); any other key spends a purchased Deep Audit credit. It posts the
+job, polls to completion (progress printed to stderr, ~1-3 min), then prints:
 - **LAI score** (0-5) + grade and confidence %, plus AI / SEO / Local sub-scores
 - **Section scores (0-5)** for all 9 sections
 - **Coverage** (% of subsections with a live checker; AI checks only run when LLM keys are set)
 - **Top findings** with section + task id + evidence
 
-Override the engine host with `SEO_SCORE_ENGINE_URL` if needed.
+`--business-type` (saas | local_service | ecommerce | storefront | blog | publisher) tunes
+which checks apply. `deep-start` / `deep-status` split the run so you don't block, and
+`deep-usage` reads `GET /deep-audit/usage` (used / remaining this month).
+
+Override the Deep Audit host with `SEO_SCORE_DEEP_AUDIT_URL` if needed
+(`SEO_SCORE_ENGINE_URL` is still read; the legacy `https://engine.seoscoreapi.com` works).
 
 ## Tips
 

@@ -3,7 +3,10 @@
 
 Usage:
     seo_audit.py audit <url> [--json]
-    seo_audit.py deep <url> [--json]
+    seo_audit.py deep <url> [--business-type TYPE] [--json]
+    seo_audit.py deep-start <url> [--business-type TYPE] [--json]
+    seo_audit.py deep-status <job_id> [--json]
+    seo_audit.py deep-usage [--json]
     seo_audit.py batch <url> [<url>...] [--json]
     seo_audit.py competitive <url> <competitor_url> <keyword> [--json]
     seo_audit.py report <domain>
@@ -21,9 +24,16 @@ import urllib.parse
 import urllib.request
 
 BASE_URL = "https://seoscoreapi.com"
-# Deep Audit engine — async, 14k+ checks across 9 sections. Requires a Pro/Ultra
-# API key (auth is bridged to the main app; Ultra/Pro auto-granted).
-ENGINE_URL = os.environ.get("SEO_SCORE_ENGINE_URL", "https://engine.seoscoreapi.com")
+# Deep Site Audit — async, 14k+ checks across 9 sections. Served on the main host
+# (POST /site-audit, GET /site-audit/{job_id}, GET /deep-audit/usage). Included on
+# Pro/Ultra; other keys spend a purchased Deep Audit credit. Override the host with
+# SEO_SCORE_DEEP_AUDIT_URL (SEO_SCORE_ENGINE_URL is still read; the legacy
+# https://engine.seoscoreapi.com keeps working).
+DEEP_AUDIT_URL = (
+    os.environ.get("SEO_SCORE_DEEP_AUDIT_URL")
+    or os.environ.get("SEO_SCORE_ENGINE_URL")
+    or BASE_URL
+).rstrip("/")
 API_KEY = os.environ.get("SEO_SCORE_API_KEY", "")
 
 
@@ -51,13 +61,20 @@ def _request(method, path, headers=None, body=None):
         sys.exit(1)
 
 
+def _deep_usage_path():
+    """Main host: /deep-audit/usage (its /usage is the per-URL allowance).
+    Legacy engine host: /usage."""
+    host = DEEP_AUDIT_URL.split("://", 1)[-1]
+    return "/usage" if host.startswith("engine.") else "/deep-audit/usage"
+
+
 def _engine_request(method, path, headers=None, body=None):
-    """Make an HTTP request against the Deep Audit engine and return parsed JSON.
+    """Make an HTTP request against the Deep Site Audit API and return parsed JSON.
 
     Unlike _request, this returns (status_code, parsed_body) rather than exiting
     on error, so callers can handle 429 (quota/queue) and 401/403 (auth) cleanly.
     """
-    url = f"{ENGINE_URL}{path}"
+    url = f"{DEEP_AUDIT_URL}{path}"
     hdrs = headers or {}
     data = json.dumps(body).encode() if body is not None else None
     if data:
@@ -72,7 +89,7 @@ def _engine_request(method, path, headers=None, body=None):
         except json.JSONDecodeError:
             return e.code, {}
     except urllib.error.URLError as e:
-        print(f"Connection error reaching the Deep Audit engine: {e.reason}", file=sys.stderr)
+        print(f"Connection error reaching Deep Site Audit at {DEEP_AUDIT_URL}: {e.reason}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -321,29 +338,41 @@ def _print_deep(result):
     print(f"  directory) are expected — focus on the checks relevant to the site.{RESET}")
 
 
-def cmd_deep(url, raw_json=False):
-    """Run an async Deep Audit (14k+ checks) via the engine and poll to completion."""
+def _deep_key_or_exit():
     if not API_KEY:
-        print("Error: Deep Audit requires a Pro or Ultra API key.", file=sys.stderr)
-        print("Set SEO_SCORE_API_KEY (Ultra/Pro is auto-granted engine access).", file=sys.stderr)
+        print("Error: Deep Audit needs an API key (Pro/Ultra, or one with Deep Audit credits).", file=sys.stderr)
+        print("Set SEO_SCORE_API_KEY.", file=sys.stderr)
         sys.exit(1)
+    return {"X-API-Key": API_KEY}
 
-    url = _ensure_scheme(url)
-    hdrs = {"X-API-Key": API_KEY}
 
-    status, body = _engine_request("POST", "/site-audit", headers=hdrs, body={"url": url})
+def _deep_start(url, business_type=None):
+    """Start a Deep Site Audit job and return its job_id (exits on error)."""
+    hdrs = _deep_key_or_exit()
+    body = {"url": _ensure_scheme(url)}
+    if business_type:
+        body["business_type"] = business_type
+    status, resp = _engine_request("POST", "/site-audit", headers=hdrs, body=body)
     if status == 429:
-        print(f"Deep Audit unavailable right now: {body.get('detail', 'quota or queue limit')}", file=sys.stderr)
+        print(f"Deep Audit unavailable right now: {resp.get('detail', 'quota or queue limit')}", file=sys.stderr)
+        sys.exit(1)
+    if status == 402:
+        print(f"No Deep Audits left on this key: {resp.get('detail', '')} "
+              f"Pro includes 20/month, Ultra 100/month; credits work on any plan.", file=sys.stderr)
         sys.exit(1)
     if status in (401, 403):
-        print(f"Auth failed for Deep Audit ({status}). A Pro/Ultra key is required. "
-              f"{body.get('detail', '')}", file=sys.stderr)
+        print(f"Auth failed for Deep Audit ({status}). {resp.get('detail', '')}", file=sys.stderr)
         sys.exit(1)
-    if status != 200 or "job_id" not in body:
-        print(f"Failed to start Deep Audit (HTTP {status}): {body.get('detail', body)}", file=sys.stderr)
+    if status not in (200, 202) or "job_id" not in resp:
+        print(f"Failed to start Deep Audit (HTTP {status}): {resp.get('detail', resp)}", file=sys.stderr)
         sys.exit(1)
+    return resp
 
-    job_id = body["job_id"]
+
+def cmd_deep(url, raw_json=False, business_type=None, poll_seconds=6, timeout_seconds=900):
+    """Run an async Deep Site Audit (14k+ checks) and poll to completion."""
+    hdrs = _deep_key_or_exit()
+    job_id = _deep_start(url, business_type)["job_id"]
     if not raw_json:
         print(f"Deep Audit queued (job {job_id}). This runs thousands of checks and "
               f"typically takes 1-3 minutes...", file=sys.stderr)
@@ -351,7 +380,7 @@ def cmd_deep(url, raw_json=False):
     start = time.time()
     last_stage = None
     while True:
-        time.sleep(6)
+        time.sleep(poll_seconds)
         status, p = _engine_request("GET", f"/site-audit/{job_id}", headers=hdrs)
         if status != 200:
             print(f"Error polling Deep Audit (HTTP {status}): {p.get('detail', p)}", file=sys.stderr)
@@ -373,9 +402,59 @@ def cmd_deep(url, raw_json=False):
         if state == "failed":
             print(f"Deep Audit failed: {p.get('error', 'unknown error')}", file=sys.stderr)
             sys.exit(1)
-        if time.time() - start > 900:
-            print("Deep Audit timed out after 15 minutes.", file=sys.stderr)
+        if time.time() - start > timeout_seconds:
+            print(f"Deep Audit still running after {timeout_seconds // 60} minutes. "
+                  f"Check later: seo_audit.py deep-status {job_id}", file=sys.stderr)
             sys.exit(1)
+
+
+def cmd_deep_start(url, raw_json=False, business_type=None):
+    """Queue a Deep Site Audit and print the job id without waiting."""
+    job = _deep_start(url, business_type)
+    if raw_json:
+        print(json.dumps(job, indent=2))
+    else:
+        print(f"Deep Audit queued: job {job['job_id']}")
+        print(f"  Check it with: seo_audit.py deep-status {job['job_id']}")
+
+
+def cmd_deep_status(job_id, raw_json=False):
+    """Print a Deep Site Audit job's status (and the result once completed)."""
+    hdrs = _deep_key_or_exit()
+    status, p = _engine_request("GET", f"/site-audit/{urllib.parse.quote(job_id, safe='')}", headers=hdrs)
+    if status == 404:
+        print("Deep Audit job not found (unknown id, or started by a different key).", file=sys.stderr)
+        sys.exit(1)
+    if status != 200:
+        print(f"Error polling Deep Audit (HTTP {status}): {p.get('detail', p)}", file=sys.stderr)
+        sys.exit(1)
+    if raw_json:
+        print(json.dumps(p, indent=2))
+        return
+    state = p.get("status")
+    if state == "completed":
+        _print_deep(p.get("result", {}))
+    elif state == "failed":
+        print(f"Deep Audit failed: {p.get('error', 'unknown error')}")
+    elif state == "queued":
+        print(f"Queued #{p.get('queue_position', '?')} (eta ~{p.get('eta_seconds', '?')}s)")
+    else:
+        print(f"{state}: {p.get('progress', 0)}% — {p.get('stage', '')}")
+
+
+def cmd_deep_usage(raw_json=False):
+    """Print Deep Site Audits used/remaining this month."""
+    hdrs = _deep_key_or_exit()
+    status, p = _engine_request("GET", _deep_usage_path(), headers=hdrs)
+    if status != 200:
+        print(f"Error reading Deep Audit usage (HTTP {status}): {p.get('detail', p)}", file=sys.stderr)
+        sys.exit(1)
+    if raw_json:
+        print(json.dumps(p, indent=2))
+        return
+    sa = p.get("site_audit", {})
+    print(f"Deep Audits this month ({p.get('tier', '?')}): {sa.get('used', '?')} used, "
+          f"{sa.get('remaining', '?')} remaining")
 
 
 def cmd_scoreboard():
@@ -404,6 +483,18 @@ def main():
         print(__doc__)
         sys.exit(1)
 
+    business_type = None
+    if "--business-type" in args:
+        i = args.index("--business-type")
+        if i + 1 >= len(args):
+            print("--business-type needs a value (saas, local_service, ecommerce, storefront, blog, publisher)", file=sys.stderr)
+            sys.exit(1)
+        business_type = args[i + 1]
+        del args[i:i + 2]
+        if not args:
+            print(__doc__)
+            sys.exit(1)
+
     cmd = args[0]
 
     if cmd == "audit":
@@ -414,9 +505,24 @@ def main():
 
     elif cmd == "deep":
         if len(args) < 2:
-            print("Usage: seo_audit.py deep <url> [--json]", file=sys.stderr)
+            print("Usage: seo_audit.py deep <url> [--business-type TYPE] [--json]", file=sys.stderr)
             sys.exit(1)
-        cmd_deep(args[1], raw_json)
+        cmd_deep(args[1], raw_json, business_type)
+
+    elif cmd == "deep-start":
+        if len(args) < 2:
+            print("Usage: seo_audit.py deep-start <url> [--business-type TYPE] [--json]", file=sys.stderr)
+            sys.exit(1)
+        cmd_deep_start(args[1], raw_json, business_type)
+
+    elif cmd == "deep-status":
+        if len(args) < 2:
+            print("Usage: seo_audit.py deep-status <job_id> [--json]", file=sys.stderr)
+            sys.exit(1)
+        cmd_deep_status(args[1], raw_json)
+
+    elif cmd == "deep-usage":
+        cmd_deep_usage(raw_json)
 
     elif cmd == "batch":
         if len(args) < 2:

@@ -38,6 +38,10 @@ python3 skills/ada-report/scripts/ada_report.py audit https://example.com \
     --prepared-for "Acme Corp. / Matter 2026-114" --prepared-by "Jane Doe, Esq." \
     --signature jane-signature.png
 
+# Also list the third-party trackers the page loads (analytics, ad pixels, session replay,
+# chat), in the same PDF. Paid plans; no extra audit is counted.
+python3 skills/ada-report/scripts/ada_report.py audit https://example.com --trackers
+
 # Audit a list of URLs (one per line, # for comments)
 python3 skills/ada-report/scripts/ada_report.py audit --file urls.txt --out accessibility-audits
 
@@ -58,9 +62,21 @@ python3 skills/ada-report/scripts/ada_report.py compare before.json after.json -
 | "put our firm name / logo on it" | add `--firm "..."` and/or `--logo path.png` (PNG or JPG) |
 | "I'm the reviewer" / "add my signature" | `--prepared-by "Name"`, and `--signature path.png` if they have an image |
 | "no signature lines" | `--no-signature-block` |
+| "what trackers / pixels are on the site" / "what does it send to third parties" | add `--trackers` to `audit` |
 | "include the risk rating" | `--include-risk` (the API's automated lawsuit-risk flag; off by default) |
 | "they fixed it, run it again and show what changed" | `audit` the same URL, then `compare <old json> <new json>` |
 | "make the PDF again" | `pdf <json>` |
+
+## The tracker inventory (`--trackers`)
+
+Adds a section listing each third-party tool the testing browser saw the page load on
+one visit: vendor, type, whether it was in the page source or added by a tag manager,
+how many requests it made, up to three request URLs as evidence, and the consent tool on
+the page if one was detected. It is part of the same fingerprinted result.
+
+**It is an inventory, not a finding.** It does not say whether a tool waited for consent,
+what data it received, or whether its use is lawful. Never describe it as a violation,
+exposure or risk; report what loaded and let the reader draw conclusions.
 
 ## If something goes wrong
 

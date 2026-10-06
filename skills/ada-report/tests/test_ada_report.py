@@ -140,3 +140,66 @@ def test_guessable_flag_aliases_work(tmp_path: Path) -> None:
              "--reviewer", "Jane Doe"])
     t = text_of(tmp_path / "a.pdf")
     assert "X LLP" in t and "Jane Doe" in t
+
+
+TRACKERS = {
+    "method": "browser",
+    "summary": {"trackers": 2, "tracker_requests": 5, "page_requests": 40, "consent_manager": None},
+    "trackers": [
+        {"id": "ga4", "vendor": "Google Analytics", "category": "analytics",
+         "found_in": ["html", "network"], "injected": False, "requests": 2,
+         "evidence": ["https://www.google-analytics.com/g/collect"], "ids": ["G-TEST123"]},
+        {"id": "meta_pixel", "vendor": "Meta Pixel", "category": "advertising",
+         "found_in": ["network"], "injected": True, "requests": 3,
+         "evidence": ["https://connect.facebook.net/en_US/fbevents.js"]},
+    ],
+    "consent_managers": [],
+    "notes": [],
+}
+
+
+def test_no_tracker_section_unless_the_audit_asked(tmp_path: Path) -> None:
+    txt = text_of(ar.render_audit(audit(RESULT), tmp_path / "a.pdf"))
+    assert "trackers" not in txt.lower()
+
+
+def test_tracker_inventory_section(tmp_path: Path) -> None:
+    txt = text_of(ar.render_audit(audit({**RESULT, "trackers": TRACKERS}), tmp_path / "a.pdf"))
+    txt = " ".join(txt.split())  # the PDF wraps lines
+    assert "Third-party trackers loaded by this page" in txt
+    for needle in ("Google Analytics", "G-TEST123", "Meta Pixel", "Advertising",
+                   "added by a tag manager", "google-analytics.com/g/collect",
+                   "none detected", "5 of 40"):
+        assert needle in txt, needle
+    # An inventory, never a finding about consent or liability.
+    assert "It does not say" in txt and "not legal advice" in txt
+    for word in ("violation of", "illegal", "unlawful", "exposure", "liable"):
+        assert word not in txt.lower(), word
+
+
+def test_tracker_block_changes_the_fingerprint() -> None:
+    assert ar.fingerprint(RESULT) != ar.fingerprint({**RESULT, "trackers": TRACKERS})
+
+
+def test_tracker_inventory_empty_and_failed(tmp_path: Path) -> None:
+    empty = {**TRACKERS, "trackers": [], "consent_managers": [{"vendor": "OneTrust"}]}
+    txt = text_of(ar.render_audit(audit({**RESULT, "trackers": empty}), tmp_path / "e.pdf"))
+    assert "No known analytics" in txt and "OneTrust" in txt
+    failed = {"error": "The tracker inventory could not be collected for this page."}
+    txt = text_of(ar.render_audit(audit({**RESULT, "trackers": failed}), tmp_path / "f.pdf"))
+    assert "could not be collected" in txt
+
+
+def test_trackers_flag_asks_the_api_for_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    class Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return json.dumps(RESULT).encode()
+
+    monkeypatch.setenv("SEO_SCORE_API_KEY", "k")
+    monkeypatch.setattr(ar.urllib.request, "urlopen", lambda req, timeout=0: seen.append(req.full_url) or Resp())
+    ar.run_audit("https://client-example.com")
+    ar.run_audit("https://client-example.com", trackers=True)
+    assert "include=" not in seen[0] and seen[1].endswith("include=trackers")

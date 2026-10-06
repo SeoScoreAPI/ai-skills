@@ -3,9 +3,10 @@
 
 Wraps the SEO Score API accessibility endpoint (https://seoscoreapi.com). Three commands:
 
-    ada_report.py audit https://example.com [more URLs...] [--out audits/]
+    ada_report.py audit https://example.com [more URLs...] [--out audits/] [--trackers]
         Runs the audit, saves the raw result as JSON with the UTC time and a SHA-256
-        fingerprint, and writes a PDF next to it.
+        fingerprint, and writes a PDF next to it. --trackers adds an inventory of the
+        third-party trackers the page loaded (analytics, ad pixels, session replay, chat).
 
     ada_report.py pdf audits/example.com-20260929T2150Z.json [--out report.pdf]
         Re-renders the PDF for a saved audit.
@@ -34,7 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 API_BASE = os.environ.get("SEO_SCORE_API_BASE", "https://seoscoreapi.com").rstrip("/")
 ENDPOINT = "/audit/accessibility"
 
@@ -78,6 +79,19 @@ LIMITS = (
     "changes, or other pages are not covered."
 )
 
+TRACKER_LIMITS = (
+    "This section is an inventory: the third-party tools the testing browser saw the page "
+    "load during one visit, with no clicks and no consent choice made. It does not say "
+    "whether a tool waited for consent, what data it received, or whether its use is "
+    "lawful, and it is not legal advice. A tool that only loads after an interaction, "
+    "after login, or on another page will not appear here."
+)
+CATEGORY_LABELS = {
+    "analytics": "Analytics", "advertising": "Advertising", "session_replay": "Session replay",
+    "chat": "Chat widget", "tag_manager": "Tag manager", "marketing_automation": "Marketing automation",
+    "ab_testing": "A/B testing", "monitoring": "Monitoring", "consent_manager": "Consent tool",
+}
+
 
 # ---------------------------------------------------------------------------
 # API + storage
@@ -90,8 +104,11 @@ def api_key() -> str:
     return key
 
 
-def run_audit(url: str) -> dict[str, Any]:
-    q = urllib.parse.urlencode({"url": url})
+def run_audit(url: str, trackers: bool = False) -> dict[str, Any]:
+    params = {"url": url}
+    if trackers:  # the same audit, plus the tracker inventory (paid plans, no extra audit)
+        params["include"] = "trackers"
+    q = urllib.parse.urlencode(params)
     req = urllib.request.Request(f"{API_BASE}{ENDPOINT}?{q}", headers={
         "X-API-Key": api_key(), "User-Agent": f"seoscoreapi-ada-report/{VERSION}"})
     try:
@@ -370,6 +387,56 @@ def when(iso: str) -> str:
         return iso
 
 
+def _name(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("vendor") or item.get("name") or item.get("id") or "")
+    return str(item or "")
+
+
+def render_trackers(w: Writer, r: dict[str, Any]) -> None:
+    """The tracker inventory section. Nothing is written unless the audit asked for it."""
+    block = r.get("trackers")
+    if not isinstance(block, dict):
+        if r.get("_trackers_gated"):
+            w.h2("Third-party trackers")
+            w.p(str(r["_trackers_gated"]), 9)
+        return
+    w.h2("Third-party trackers loaded by this page")
+    if block.get("error"):
+        w.p(str(block["error"]), 9)
+        return
+    items = block.get("trackers") or []
+    summ = block.get("summary") or {}
+    consent = [n for n in (_name(c) for c in (block.get("consent_managers") or [])) if n]
+    if not consent and summ.get("consent_manager"):
+        consent = [_name(summ["consent_manager"])]
+    w.kv([("Tools found", str(len(items))),
+          ("Requests to them", f"{summ.get('tracker_requests', 0)} of "
+                               f"{summ.get('page_requests', '?')} requests the page made"),
+          ("Consent tool on the page", ", ".join(consent) or "none detected")])
+    if not items:
+        w.p("No known analytics, advertising, session-replay or chat tools were seen "
+            "loading on this visit.")
+    else:
+        w.table(["#", "Vendor", "Type", "Where seen", "Requests"],
+                [[str(i), str(t.get("vendor", "")),
+                  CATEGORY_LABELS.get(str(t.get("category")), str(t.get("category", ""))),
+                  ("added by a tag manager (not in the page source)" if t.get("injected")
+                   else " + ".join({"html": "page source", "network": "network"}.get(f, str(f))
+                                   for f in (t.get("found_in") or []))),
+                  str(t.get("requests", ""))]
+                 for i, t in enumerate(items, 1)],
+                [8, 52, 34, w.w - 114, 20])
+        for i, t in enumerate(items, 1):
+            ids = ", ".join(str(x) for x in (t.get("ids") or []))
+            w.p(f"{i}. {t.get('vendor', '')}" + (f" (ID {ids})" if ids else ""), 9, bold=True,
+                color=(15, 23, 42))
+            for u in (t.get("evidence") or [])[:3]:
+                w.p(f"Requested: {str(u)[:160]}", 7.5, mono=True, color=(100, 116, 139))
+    w.pdf.ln(1)
+    w.p(TRACKER_LIMITS, 8.5, color=(71, 85, 105))
+
+
 def render_audit(data: dict[str, Any], out: Path, brand: Branding | None = None) -> Path:
     brand = brand or Branding()
     r = data["result"]
@@ -455,6 +522,8 @@ def render_audit(data: dict[str, Any], out: Path, brand: Branding | None = None)
         for v in review:
             w.p(f"- {v.get('help') or v.get('description') or v.get('rule_id')}"
                 f" ({v.get('affected_elements', '?')} element(s))", 9)
+
+    render_trackers(w, r)
 
     w.h2("Scope and limits")
     w.p(LIMITS, 8.5, color=(71, 85, 105))
@@ -547,6 +616,9 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--file", type=Path, help="text file with one URL per line")
     a.add_argument("--out", type=Path, default=Path("accessibility-audits"))
     a.add_argument("--prepared-for", default="", help="client and/or matter")
+    a.add_argument("--trackers", action="store_true",
+                   help="also list the third-party trackers the page loads (analytics, ad "
+                        "pixels, session replay, chat); paid plans, no extra audit")
     p = sub.add_parser("pdf", help="render a saved audit JSON as PDF")
     p.add_argument("audit", type=Path)
     p.add_argument("--out", type=Path)
@@ -583,15 +655,18 @@ def main(argv: list[str] | None = None) -> int:
         if not urls:
             ap.error("give at least one URL (or --file)")
         for url in urls:
-            data = wrap(url, run_audit(url))
+            data = wrap(url, run_audit(url, trackers=args.trackers))
             stamp = data["audited_at"].replace(":", "").replace("-", "").replace("+0000", "Z")
             base = f"{slug(url)}-{stamp[:15]}Z"
             args.out.mkdir(parents=True, exist_ok=True)
             (args.out / f"{base}.json").write_text(json.dumps(data, indent=2))
             pdf = render_audit(data, args.out / f"{base}.pdf", brand)
             r = data["result"]
+            found = (r.get("trackers") or {}).get("trackers") if isinstance(r.get("trackers"), dict) else None
             print(f"{url}: score {r.get('score')} ({r.get('grade')}), "
-                  f"{len(r.get('violations') or [])} failed rule(s)\n  JSON {args.out / base}.json\n  PDF  {pdf}")
+                  f"{len(r.get('violations') or [])} failed rule(s)"
+                  + (f", {len(found)} tracker(s)" if found is not None else "")
+                  + f"\n  JSON {args.out / base}.json\n  PDF  {pdf}")
     elif args.cmd == "pdf":
         data = load(args.audit)
         out = render_audit(data, args.out or args.audit.with_name(

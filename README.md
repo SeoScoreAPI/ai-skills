@@ -6,7 +6,7 @@ read.
 
 | Skill | What you get |
 |---|---|
-| [`ada-report`](skills/ada-report) | ADA / WCAG 2.1 AA accessibility audits as **dated PDF reports**: every issue with its WCAG success criterion, impact, affected elements and the fix, plus a **before/after remediation report**. Raw JSON saved with a SHA-256 fingerprint. |
+| [`ada-report`](skills/ada-report) | ADA / WCAG 2.1 AA accessibility audits as **dated PDF reports**: every issue with its WCAG success criterion, impact, affected elements and the fix, plus a **before/after remediation report**. Optional **tracker inventory** (`--trackers`): every analytics, ad, session-replay and chat tool the page loads. Raw JSON saved with a SHA-256 fingerprint. |
 | [`seo-score`](skills/seo-score) | SEO audits, Deep Audits, batch audits and score comparisons, inline in your assistant. |
 
 **Unbranded, so it goes out under your name.** The PDF carries no vendor branding (text,

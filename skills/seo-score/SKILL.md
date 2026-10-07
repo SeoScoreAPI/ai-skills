@@ -69,7 +69,7 @@ The audit returns:
 - **Overall score** (0-100) and **letter grade** (A+ to F)
 - **Category breakdowns**: Meta, Technical, Social, Performance, Accessibility
 - **Top priorities**: The most impactful fixes to improve the score
-- **Detailed checks**: Pass/fail for each of the 28 SEO checks
+- **Detailed checks**: Pass/fail for each check returned (80+ on paid plans; a free key is scored on 50+ checks and sees 2 per category plus the top 2 priorities)
 
 Use `--json` flag on any command for raw JSON output.
 

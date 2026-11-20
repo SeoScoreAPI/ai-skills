@@ -8,13 +8,19 @@ Wraps the SEO Score API accessibility endpoint (https://seoscoreapi.com). Three 
         fingerprint, and writes a PDF next to it. --trackers adds an inventory of the
         third-party trackers the page loaded (analytics, ad pixels, session replay, chat).
 
+    ada_report.py audit https://example.com --local [--machine-label "Office laptop"]
+        Runs the same checks in a browser on THIS computer instead of the hosted audit
+        (for sites that turn the audit server away). Same JSON + fingerprinted PDF,
+        marked as a local run. Needs `pip install playwright` and
+        `python3 -m playwright install chromium`; no API key.
+
     ada_report.py pdf audits/example.com-20260929T2150Z.json [--out report.pdf]
         Re-renders the PDF for a saved audit.
 
     ada_report.py compare before.json after.json [--out remediation.pdf]
         Before/after remediation report: resolved, still open, and new issues.
 
-Needs SEO_SCORE_API_KEY (https://seoscoreapi.com; accessibility audits need a paid plan) and
+The hosted audit needs SEO_SCORE_API_KEY (https://seoscoreapi.com; accessibility audits need a paid plan) and
 `pip install fpdf2`. Reports are unbranded: add your own --firm / --logo / --signature.
 Works the same from Claude, ChatGPT, Gemini, or a plain terminal: it is plain Python.
 """
@@ -35,7 +41,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 API_BASE = os.environ.get("SEO_SCORE_API_BASE", "https://seoscoreapi.com").rstrip("/")
 ENDPOINT = "/audit/accessibility"
 
@@ -85,6 +91,15 @@ TRACKER_LIMITS = (
     "whether a tool waited for consent, what data it received, or whether its use is "
     "lawful, and it is not legal advice. A tool that only loads after an interaction, "
     "after login, or on another page will not appear here."
+)
+LOCAL_LIMITS = (
+    "Local run: this audit ran in a browser on the auditor's own computer and internet "
+    "connection, not on the hosted audit service. It used the same axe-core version, rule set "
+    "and scoring. Results can differ from a hosted run of the same page because of the "
+    "network location, browser version, cookies, consent choices or what the site serves to "
+    "this connection. The browser's identity was not changed and no bot check was bypassed. "
+    "No IP address, host name or user name was recorded; the network is described only by "
+    "its address class, and the machine by the label the auditor typed, if any."
 )
 CATEGORY_LABELS = {
     "analytics": "Analytics", "advertising": "Advertising", "session_replay": "Session replay",
@@ -137,8 +152,9 @@ def explain(code: int, detail: str) -> str:
     if code == 422:
         return ("the website could not be audited. Most often the site blocks automated "
                 "browsers (bot protection) or the page failed to load. Try another page on "
-                "the same site, or ask the site owner to allow the audit. Blocked audits are "
-                f"not counted against your plan. ({detail})")
+                "the same site, ask the site owner to allow the audit, or run it from your own "
+                "computer with --local. Blocked audits are not counted against your plan. "
+                f"({detail})")
     if code == 429:
         return "too many audits in a short time. Wait a minute and try again."
     return f"HTTP {code}: {detail}"
@@ -150,11 +166,34 @@ def fingerprint(result: dict[str, Any]) -> str:
 
 
 def wrap(url: str, result: dict[str, Any]) -> dict[str, Any]:
+    local = is_local(result)
     return {
         "tool": "seoscoreapi ada-report", "tool_version": VERSION,
         "requested_url": url, "audited_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "api": f"{API_BASE}{ENDPOINT}", "sha256": fingerprint(result), "result": result,
+        "api": "local browser run" if local else f"{API_BASE}{ENDPOINT}",
+        "sha256": fingerprint(result), "result": result,
     }
+
+
+def is_local(result: dict[str, Any]) -> bool:
+    """A local run carries a `run` block inside the fingerprinted result."""
+    run = result.get("run")
+    return isinstance(run, dict) and run.get("location") == "local"
+
+
+def run_local_audit(url: str, machine_label: str = "", headed: bool = False) -> dict[str, Any]:
+    """The --local audit: same checks, in a browser on this computer (local_audit.py)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import local_audit
+    finally:
+        sys.path.pop(0)
+    try:
+        result: dict[str, Any] = local_audit.run_local(
+            url, headed=headed, machine_label=machine_label, tool_version=VERSION)
+    except local_audit.LocalAuditError as exc:
+        sys.exit(f"{url}: {exc}")
+    return result
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -437,23 +476,45 @@ def render_trackers(w: Writer, r: dict[str, Any]) -> None:
     w.p(TRACKER_LIMITS, 8.5, color=(71, 85, 105))
 
 
+def local_rows(run: dict[str, Any]) -> list[tuple[str, str]]:
+    """Where a local run came from: machine label, OS, network class, browser, engine."""
+    m, net = run.get("machine") or {}, run.get("network") or {}
+    b, axe = run.get("browser") or {}, run.get("axe_core") or {}
+    ipv = f" (IPv{net['ip_version']})" if net.get("ip_version") else ""
+    return [
+        ("Run", "Local: the auditor's own computer and connection, not the hosted service"),
+        ("Machine", f"{m.get('label') or 'not named'} ({m.get('os', '?')}, {m.get('arch', '?')})"),
+        ("Network", f"{net.get('local_address_class', 'unknown')}{ipv}; address not recorded"),
+        ("Browser", f"{b.get('engine', 'Chromium')} {b.get('version', '')}, "
+                    f"{'headless' if b.get('headless', True) else 'visible window'}, "
+                    "identity unchanged"),
+        ("Engine", f"axe-core {axe.get('version', '?')} (file SHA-256 "
+                   f"{str(axe.get('sha256', ''))[:16]}...)"),
+    ]
+
+
 def render_audit(data: dict[str, Any], out: Path, brand: Branding | None = None) -> Path:
     brand = brand or Branding()
     r = data["result"]
     url = r.get("url") or data.get("requested_url", "")
     summ = r.get("summary") or {}
     vs = violations(r)
-    w = Writer(f"Accessibility audit: {url}",
-               f"Accessibility audit | {url} | {when(data.get('audited_at',''))}"
-               f" | SHA-256 {data.get('sha256','')[:16]}...", brand)
-    w.h1("Website Accessibility Audit")
+    local = is_local(r)
+    w = Writer(f"Accessibility audit{' (local run)' if local else ''}: {url}",
+               f"Accessibility audit{' | LOCAL RUN' if local else ''} | {url} | "
+               f"{when(data.get('audited_at',''))} | SHA-256 {data.get('sha256','')[:16]}...",
+               brand)
+    w.h1("Website Accessibility Audit" + (" (local run)" if local else ""))
     w.p(f"{url}", 11, bold=True, color=(37, 99, 235))
     w.pdf.ln(2)
     rows = [("Audited", when(data.get("audited_at", ""))),
             ("Standard", str(r.get("standard") or "WCAG 2.1 AA")),
-            ("Method", "Automated axe-core rule checks, run in a real browser"),
+            ("Method", "Automated axe-core rule checks, run in a real browser"
+                       + (" on the auditor's own computer (local run)" if local else "")),
             ("HTTP status", str(r.get("response_code", ""))),
             ("Fingerprint", f"SHA-256 {data.get('sha256','')}")]
+    if local:
+        rows[3:3] = local_rows(r["run"])
     if brand.prepared_for:
         rows.insert(0, ("Prepared for", brand.prepared_for))
     w.kv(rows)
@@ -527,6 +588,8 @@ def render_audit(data: dict[str, Any], out: Path, brand: Branding | None = None)
 
     w.h2("Scope and limits")
     w.p(LIMITS, 8.5, color=(71, 85, 105))
+    if local:
+        w.p(LOCAL_LIMITS, 8.5, color=(71, 85, 105))
     w.p(f"Raw result preserved in the audit JSON; recomputing SHA-256 over its 'result' "
         f"object (sorted keys, compact) reproduces {data.get('sha256','')}.", 8,
         color=(100, 116, 139))
@@ -561,10 +624,15 @@ def render_compare(before: dict[str, Any], after: dict[str, Any], out: Path,
     w.h1("Accessibility Remediation Report")
     w.p(url, 11, bold=True, color=(37, 99, 235))
     w.pdf.ln(2)
+    def where(d: dict[str, Any]) -> str:
+        return ", local run" if is_local(d["result"]) else ""
+
     rows = [("Before", f"{when(before.get('audited_at',''))}  (score "
-                       f"{before['result'].get('score','?')}, SHA-256 {before.get('sha256','')[:16]}...)"),
+                       f"{before['result'].get('score','?')}, SHA-256 {before.get('sha256','')[:16]}..."
+                       f"{where(before)})"),
             ("After", f"{when(after.get('audited_at',''))}  (score "
-                      f"{after['result'].get('score','?')}, SHA-256 {after.get('sha256','')[:16]}...)"),
+                      f"{after['result'].get('score','?')}, SHA-256 {after.get('sha256','')[:16]}..."
+                      f"{where(after)})"),
             ("Standard", "WCAG 2.1 AA, automated axe-core rule checks")]
     if brand.prepared_for:
         rows.insert(0, ("Prepared for", brand.prepared_for))
@@ -596,6 +664,12 @@ def render_compare(before: dict[str, Any], after: dict[str, Any], out: Path,
     section("New since the first audit", d["new"])
     w.h2("Scope and limits")
     w.p(LIMITS, 8.5, color=(71, 85, 105))
+    if is_local(before["result"]) != is_local(after["result"]):
+        w.p("One audit was a local run (the auditor's own computer) and the other a hosted "
+            "run. Differences can come from where each ran as well as from changes to the "
+            "page.", 8.5, color=(71, 85, 105))
+    elif is_local(after["result"]):
+        w.p(LOCAL_LIMITS, 8.5, color=(71, 85, 105))
     w.p("Issues are matched by axe-core rule between the two audits; element counts come "
         "from each audit. Both raw results are preserved in their audit JSON files.", 8,
         color=(100, 116, 139))
@@ -619,6 +693,15 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--trackers", action="store_true",
                    help="also list the third-party trackers the page loads (analytics, ad "
                         "pixels, session replay, chat); paid plans, no extra audit")
+    a.add_argument("--local", action="store_true",
+                   help="run the checks in a browser on this computer instead of the hosted "
+                        "audit (for sites that block the audit server); needs playwright, "
+                        "no API key")
+    a.add_argument("--machine-label", default="",
+                   help="with --local: a name for this computer to print on the report, e.g. "
+                        "\"Office laptop\" (nothing about the machine is recorded otherwise)")
+    a.add_argument("--headed", action="store_true",
+                   help="with --local: show the browser window while it runs")
     p = sub.add_parser("pdf", help="render a saved audit JSON as PDF")
     p.add_argument("audit", type=Path)
     p.add_argument("--out", type=Path)
@@ -654,16 +737,23 @@ def main(argv: list[str] | None = None) -> int:
                      if ln.strip() and not ln.startswith("#")]
         if not urls:
             ap.error("give at least one URL (or --file)")
+        if args.local and args.trackers:
+            ap.error("--trackers needs the hosted audit; leave it out with --local")
+        if (args.machine_label or args.headed) and not args.local:
+            ap.error("--machine-label and --headed only apply with --local")
         for url in urls:
-            data = wrap(url, run_audit(url, trackers=args.trackers))
+            if args.local:
+                data = wrap(url, run_local_audit(url, args.machine_label, args.headed))
+            else:
+                data = wrap(url, run_audit(url, trackers=args.trackers))
             stamp = data["audited_at"].replace(":", "").replace("-", "").replace("+0000", "Z")
-            base = f"{slug(url)}-{stamp[:15]}Z"
+            base = f"{slug(url)}-{stamp[:15]}Z" + ("-local" if args.local else "")
             args.out.mkdir(parents=True, exist_ok=True)
             (args.out / f"{base}.json").write_text(json.dumps(data, indent=2))
             pdf = render_audit(data, args.out / f"{base}.pdf", brand)
             r = data["result"]
             found = (r.get("trackers") or {}).get("trackers") if isinstance(r.get("trackers"), dict) else None
-            print(f"{url}: score {r.get('score')} ({r.get('grade')}), "
+            print(f"{url}{' (local run)' if args.local else ''}: score {r.get('score')} ({r.get('grade')}), "
                   f"{len(r.get('violations') or [])} failed rule(s)"
                   + (f", {len(found)} tracker(s)" if found is not None else "")
                   + f"\n  JSON {args.out / base}.json\n  PDF  {pdf}")

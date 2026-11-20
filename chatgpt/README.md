@@ -2,7 +2,7 @@
 
 Build a private Custom GPT that runs SEO Score API accessibility audits and hands back a
 PDF. About 10 minutes, no code. Needs a ChatGPT plan that can create GPTs and an SEO
-Score API key on a paid plan (accessibility audits start at $5/mo).
+Score API key on a paid plan (accessibility audits start at $9/mo).
 
 ## 1. Create the GPT
 

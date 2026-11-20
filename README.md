@@ -33,7 +33,7 @@ connection (`pip install playwright && python3 -m playwright install chromium`, 
 `--local`). The PDF says it was a local run; no IP address or machine details are recorded
 beyond a label you choose, and it never tries to get past a site's bot protection.
 
-Accessibility audits need a paid plan (Starter, $5/mo, includes 5 a month; Pro, $39/mo,
+Accessibility audits need a paid plan (Starter, $9/mo, includes 5 a month; Pro, $39/mo,
 100; Ultra, $99/mo, 500). SEO audits work on the free tier. [Pricing](https://seoscoreapi.com/#pricing)
 
 ## Use it with Claude

@@ -16,7 +16,7 @@ shown to be unchanged later.
 
 ```bash
 pip install fpdf2
-export SEO_SCORE_API_KEY="your_key"   # https://seoscoreapi.com (accessibility audits need a paid plan, from $5/mo)
+export SEO_SCORE_API_KEY="your_key"   # https://seoscoreapi.com (accessibility audits need a paid plan, from $9/mo; not needed for --local)
 ```
 
 On Windows PowerShell: `$env:SEO_SCORE_API_KEY="your_key"`. If `python3` isn't found, use `python`.

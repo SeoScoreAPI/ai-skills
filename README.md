@@ -18,6 +18,17 @@ leave the top of page 1 clear for letterhead. Every report ends with a Review bl
 [unbranded](examples/sample-seoscoreapi.com-audit.pdf) ·
 [with a (fictitious) firm's logo and signature](examples/sample-branded-audit.pdf)
 
+## Install in Claude Code, Cursor or Codex
+
+One line installs both skills into your coding agent:
+
+```bash
+npx skills add SeoScoreAPI/ai-skills
+```
+
+Then ask your agent for an SEO or accessibility audit of any URL. Set `SEO_SCORE_API_KEY`
+first (free key at https://seoscoreapi.com).
+
 ## Quick start (terminal)
 
 ```bash

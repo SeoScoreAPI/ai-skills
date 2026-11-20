@@ -6,7 +6,7 @@ read.
 
 | Skill | What you get |
 |---|---|
-| [`ada-report`](skills/ada-report) | ADA / WCAG 2.1 AA accessibility audits as **dated PDF reports**: every issue with its WCAG success criterion, impact, affected elements and the fix, plus a **before/after remediation report**. Optional **tracker inventory** (`--trackers`): every analytics, ad, session-replay and chat tool the page loads. Raw JSON saved with a SHA-256 fingerprint. |
+| [`ada-report`](skills/ada-report) | ADA / WCAG 2.1 AA accessibility audits as **dated PDF reports**: every issue with its WCAG success criterion, impact, affected elements and the fix, plus a **before/after remediation report**. Optional **tracker inventory** (`--trackers`): every analytics, ad, session-replay and chat tool the page loads. Raw JSON saved with a SHA-256 fingerprint. Site blocks cloud servers? `--local` runs the same checks in a browser on your own computer and marks the report as a local run. |
 | [`seo-score`](skills/seo-score) | SEO audits, Deep Audits, batch audits and score comparisons, inline in your assistant. |
 
 **Unbranded, so it goes out under your name.** The PDF carries no vendor branding (text,
@@ -28,7 +28,12 @@ python3 skills/ada-report/scripts/ada_report.py audit https://example.com \
     --firm "Your Firm LLP" --logo logo.png --prepared-for "Client / Matter" --prepared-by "Your Name"
 ```
 
-Accessibility audits need a paid plan (Starter, $5/mo, includes 5 a month; Pro, $39/mo,
+If a site turns the audit server away, run the same checks from your own computer and
+connection (`pip install playwright && python3 -m playwright install chromium`, then add
+`--local`). The PDF says it was a local run; no IP address or machine details are recorded
+beyond a label you choose, and it never tries to get past a site's bot protection.
+
+Accessibility audits need a paid plan (Starter, $9/mo, includes 5 a month; Pro, $39/mo,
 100; Ultra, $99/mo, 500). SEO audits work on the free tier. [Pricing](https://seoscoreapi.com/#pricing)
 
 ## Use it with Claude

@@ -42,7 +42,7 @@ period; each run is another dated record.
 | ChatGPT | Custom GPT with the audit action: [chatgpt/](../chatgpt/README.md) | 10 min |
 | Neither | Run the script in a terminal: [README](../README.md#quick-start-terminal) | 5 min |
 
-You need an SEO Score API key on a paid plan: Starter ($5/mo, 5 accessibility audits),
+You need an SEO Score API key on a paid plan: Starter ($9/mo, 5 accessibility audits),
 Pro ($39/mo, 100, one year of history), or Ultra ($99/mo, 500, unlimited history).
 [seoscoreapi.com](https://seoscoreapi.com/#pricing)
 
